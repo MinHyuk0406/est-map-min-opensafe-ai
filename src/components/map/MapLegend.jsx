@@ -1,4 +1,4 @@
-import { RISK_LEVELS } from '../utils/dataProcessor'
+import { RISK_LEVELS } from '../../utils/dataProcessor'
 
 export default function MapLegend() {
   return (

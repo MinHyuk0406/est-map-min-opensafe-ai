@@ -1,7 +1,10 @@
 import {
   MIN_STORE_COUNT,
   computeQuantileBuckets,
+  getDistrictIndustryStats,
   getDistrictName,
+  getDistrictNames,
+  getDistrictStats,
   getDongStats,
   getRiskLevel,
   getSeoulAverage,
@@ -20,12 +23,13 @@ function MetricCard({ label, value, suffix = '개' }) {
 
 export default function DongDetailPanel({
   dongCode,
+  districtName,
   quarter,
   industry,
   processed,
   onRecommendation,
 }) {
-  if (!dongCode) {
+  if (!dongCode && !districtName) {
     return (
       <aside className="detail-panel empty">
         <div className="empty-state-icon" aria-hidden="true">+</div>
@@ -36,16 +40,25 @@ export default function DongDetailPanel({
   }
 
   const quarterCode = quarterLabelToCode(quarter)
-  const info = processed?.[dongCode]
-  const stats = getDongStats(info, quarterCode, industry)
+  const districtMode = Boolean(districtName && !dongCode)
+  const info = dongCode ? processed?.[dongCode] : null
+  const stats = districtMode
+    ? getDistrictStats(processed, districtName, quarterCode, industry)
+    : getDongStats(info, quarterCode, industry)
   const seoulAverage = getSeoulAverage(processed, quarterCode, industry)
-  const rates = Object.values(processed || {})
-    .map((item) => getDongStats(item, quarterCode, industry)?.['폐업_률'])
-    .filter(Number.isFinite)
+  const rates = districtMode
+    ? getDistrictNames(processed)
+      .map((name) => getDistrictStats(processed, name, quarterCode, industry)?.['폐업_률'])
+      .filter(Number.isFinite)
+    : Object.values(processed || {})
+      .map((item) => getDongStats(item, quarterCode, industry)?.['폐업_률'])
+      .filter(Number.isFinite)
   const risk = getRiskLevel(stats?.['폐업_률'], computeQuantileBuckets(rates, 4))
   const difference = stats && seoulAverage != null ? stats['폐업_률'] - seoulAverage : null
   const { items: top5, minStores: appliedMinStores } = topIndustriesWithFallback(
-    info?.industries?.[quarterCode],
+    districtMode
+      ? getDistrictIndustryStats(processed, districtName, quarterCode)
+      : info?.industries?.[quarterCode],
     MIN_STORE_COUNT,
     5,
   )
@@ -55,8 +68,8 @@ export default function DongDetailPanel({
       <div className="detail-scroll">
         <div className="dong-heading">
           <div>
-            <h2>{info?.name || '행정동 정보 없음'}</h2>
-            <p>{getDistrictName(dongCode)}</p>
+            <h2>{districtMode ? districtName : info?.name || '행정동 정보 없음'}</h2>
+            <p>{districtMode ? '서울특별시 · 자치구 합계' : getDistrictName(dongCode)}</p>
           </div>
           {risk && (
             <span className={`risk-badge risk-${risk.key}`}>
@@ -108,7 +121,7 @@ export default function DongDetailPanel({
       </div>
 
       <div className="detail-footer">
-        <button className="recommend-button" onClick={() => onRecommendation(dongCode)}>
+        <button className="recommend-button" onClick={() => onRecommendation(districtMode ? districtName : dongCode)}>
           이 지역 업종 추천받기 <span aria-hidden="true">→</span>
         </button>
       </div>

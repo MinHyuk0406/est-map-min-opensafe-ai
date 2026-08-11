@@ -1,0 +1,10 @@
+# Local dependencies and build caches
+node_modules/
+dist/
+*.log
+
+# Large source data is kept locally; generated browser data is committed.
+src/data/서울시 일반음식점 인허가 정보.csv
+src/data/서울시 휴게음식점 인허가 정보.csv
+src/data/서울시 미용업 인허가 정보.csv
+src/data/~$*
