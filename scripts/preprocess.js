@@ -7,13 +7,33 @@ const proj4 = require('proj4')
 
 const DATA_DIR = path.join(__dirname, '../src/data')
 
-function findDataFile(extension) {
-  const file = fs.readdirSync(DATA_DIR).find((name) => name.toLowerCase().endsWith(extension))
-  if (!file) throw new Error(`${extension} 데이터 파일을 찾을 수 없습니다.`)
+function findDataFile(extension, marker = '') {
+  const file = fs.readdirSync(DATA_DIR).find((name) => (
+    name.toLowerCase().endsWith(extension) && (!marker || name.includes(marker))
+  ))
+  if (!file) throw new Error(`${marker || extension} 데이터 파일을 찾을 수 없습니다.`)
   return path.join(DATA_DIR, file)
 }
 
-async function shpToGeojson() {
+function normalizeKey(value) {
+  return String(value ?? '').trim()
+}
+
+function readCsv(marker) {
+  const csvPath = findDataFile('.csv', marker)
+  const text = iconv.decode(fs.readFileSync(csvPath), 'euc-kr')
+  const parsed = Papa.parse(text, { header: true, skipEmptyLines: true })
+  if (parsed.errors.length) throw new Error(`${marker}: ${parsed.errors[0].message}`)
+  return parsed
+}
+
+function nullableNumber(value) {
+  if (value == null || String(value).trim() === '') return null
+  const number = Number(value)
+  return Number.isFinite(number) ? number : null
+}
+
+async function shpToGeojson(byDong) {
   const shpPath = findDataFile('.shp')
   const dbfPath = findDataFile('.dbf')
   const outPath = path.join(DATA_DIR, 'seoul_dong.geojson')
@@ -29,10 +49,15 @@ async function shpToGeojson() {
 
   let result = await source.read()
   while (!result.done) {
+    const properties = result.value.properties || {}
+    const dongCode = String(properties.ADSTRD_CD || '')
     features.push({
       type: 'Feature',
       geometry: { ...result.value.geometry, coordinates: transformCoords(result.value.geometry.coordinates) },
-      properties: result.value.properties,
+      properties: {
+        ...properties,
+        ADSTRD_NM: byDong[dongCode]?.name || properties.ADSTRD_NM,
+      },
     })
     result = await source.read()
   }
@@ -42,25 +67,23 @@ async function shpToGeojson() {
 }
 
 function parseCsvToJson() {
-  const csvPath = findDataFile('.csv')
   const outRows = path.join(DATA_DIR, 'rows_parsed.json')
   const outByDong = path.join(DATA_DIR, 'processed_by_dong.json')
-  const text = iconv.decode(fs.readFileSync(csvPath), 'euc-kr')
-  const parsed = Papa.parse(text, { header: true, skipEmptyLines: true })
-  if (parsed.errors.length) throw new Error(parsed.errors[0].message)
+  const parsed = readCsv('점포-행정동')
 
   const rows = parsed.data
   fs.writeFileSync(outRows, JSON.stringify(rows, null, 2), 'utf8')
   const byDong = {}
 
   rows.forEach((row) => {
-    const quarter = row['기준_년분기_코드']
-    const dongCode = row['행정동_코드']
+    const quarter = normalizeKey(row['기준_년분기_코드'])
+    const dongCode = normalizeKey(row['행정동_코드'])
     const dongName = row['행정동_코드_명']
     const stores = Number(row['점포_수']) || 0
     const closed = Number(row['폐업_점포_수']) || 0
     const opened = Number(row['개업_점포_수']) || 0
     const industry = row['서비스_업종_코드_명']
+    const industryCode = normalizeKey(row['서비스_업종_코드'])
     if (!dongCode || !quarter || !industry) return
 
     if (!byDong[dongCode]) byDong[dongCode] = { name: dongName, quarters: {}, industries: {} }
@@ -74,26 +97,101 @@ function parseCsvToJson() {
 
     if (!byDong[dongCode].industries[quarter]) byDong[dongCode].industries[quarter] = {}
     if (!byDong[dongCode].industries[quarter][industry]) {
-      byDong[dongCode].industries[quarter][industry] = { '점포_수': 0, '폐업_점포_수': 0 }
+      byDong[dongCode].industries[quarter][industry] = {
+        code: industryCode,
+        '점포_수': 0,
+        '폐업_점포_수': 0,
+        '개업_점포_수': 0,
+      }
     }
     const industryStats = byDong[dongCode].industries[quarter][industry]
+    industryStats.code = industryCode
     industryStats['점포_수'] += stores
     industryStats['폐업_점포_수'] += closed
+    industryStats['개업_점포_수'] += opened
   })
 
   Object.values(byDong).forEach((item) => {
     Object.values(item.quarters).forEach((stats) => {
       stats['폐업_률'] = stats['점포_수'] ? (stats['폐업_점포_수'] / stats['점포_수']) * 100 : 0
+      stats['개업_률'] = stats['점포_수'] ? (stats['개업_점포_수'] / stats['점포_수']) * 100 : 0
     })
   })
 
-  fs.writeFileSync(outByDong, JSON.stringify(byDong, null, 2), 'utf8')
+  fs.writeFileSync(outByDong, JSON.stringify(byDong), 'utf8')
   console.log('Wrote UTF-8 JSON:', outRows, outByDong)
+  return byDong
+}
+
+function parseMarketContext() {
+  const salesParsed = readCsv('추정매출-행정동')
+  const floatingParsed = readCsv('길단위인구-행정동')
+  const residentParsed = readCsv('상주인구-행정동')
+  const context = {
+    metadata: {
+      salesFields: salesParsed.meta.fields,
+      floatingPopulationFields: floatingParsed.meta.fields,
+      residentPopulationFields: residentParsed.meta.fields,
+    },
+    sales: {},
+    floatingPopulation: {},
+    residentPopulation: {},
+  }
+
+  salesParsed.data.forEach((row) => {
+    const quarter = normalizeKey(row['기준_년분기_코드'])
+    const dongCode = normalizeKey(row['행정동_코드'])
+    const industryCode = normalizeKey(row['서비스_업종_코드'])
+    if (!quarter || !dongCode || !industryCode) return
+    if (!context.sales[quarter]) context.sales[quarter] = {}
+    if (!context.sales[quarter][dongCode]) context.sales[quarter][dongCode] = {}
+    const current = context.sales[quarter][dongCode][industryCode]
+    const amount = nullableNumber(row['당월_매출_금액'])
+    const count = nullableNumber(row['당월_매출_건수'])
+    context.sales[quarter][dongCode][industryCode] = {
+      industryName: row['서비스_업종_코드_명'],
+      amount: current && current.amount != null && amount != null ? current.amount + amount : amount,
+      count: current && current.count != null && count != null ? current.count + count : count,
+    }
+  })
+
+  floatingParsed.data.forEach((row) => {
+    const quarter = normalizeKey(row['기준_년분기_코드'])
+    const dongCode = normalizeKey(row['행정동_코드'])
+    if (!quarter || !dongCode) return
+    if (!context.floatingPopulation[quarter]) context.floatingPopulation[quarter] = {}
+    context.floatingPopulation[quarter][dongCode] = {
+      total: nullableNumber(row['총_유동인구_수']),
+      details: Object.fromEntries(
+        Object.entries(row).slice(4).map(([key, value]) => [key, nullableNumber(value)]),
+      ),
+    }
+  })
+
+  residentParsed.data.forEach((row) => {
+    const quarter = normalizeKey(row['기준_년분기_코드'])
+    const dongCode = normalizeKey(row['행정동_코드'])
+    if (!quarter || !dongCode) return
+    if (!context.residentPopulation[quarter]) context.residentPopulation[quarter] = {}
+    context.residentPopulation[quarter][dongCode] = {
+      total: nullableNumber(row['총_상주인구_수']),
+      households: nullableNumber(row['총_가구_수']),
+      details: Object.fromEntries(
+        Object.entries(row).slice(4).map(([key, value]) => [key, nullableNumber(value)]),
+      ),
+    }
+  })
+
+  const outPath = path.join(DATA_DIR, 'market_context.json')
+  fs.writeFileSync(outPath, JSON.stringify(context), 'utf8')
+  console.log('Wrote UTF-8 market context:', outPath)
+  return context
 }
 
 async function main() {
-  await shpToGeojson()
-  parseCsvToJson()
+  const byDong = parseCsvToJson()
+  parseMarketContext()
+  await shpToGeojson(byDong)
 }
 
 main().catch((error) => {
