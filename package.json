@@ -1,0 +1,25 @@
+{
+  "name": "est-map",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "preprocess": "node scripts/preprocess.js"
+  },
+  "dependencies": {
+    "iconv-lite": "^0.7.3",
+    "leaflet": "^1.9.4",
+    "papaparse": "^5.5.4",
+    "proj4": "^2.21.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-leaflet": "^5.0.0",
+    "shapefile": "^0.6.6"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.0.5",
+    "vite": "^8.2.1"
+  }
+}
