@@ -20,7 +20,7 @@ import {
 import MapLegend from './MapLegend'
 import RankingPanel from './RankingPanel'
 import { DATA_PATHS } from '../config/dataPaths'
-import { fetchJson } from '../services/staticDataService'
+import { fetchJsonCached } from '../services/staticDataService'
 
 const EMPTY_STYLE = { color: '#9aa4a0', fillColor: '#e7ebe9', weight: 1, fillOpacity: 0.55 }
 
@@ -52,7 +52,7 @@ export default function SeoulMap({
   const quarterCode = quarterLabelToCode(quarter)
 
   useEffect(() => {
-    fetchJson(DATA_PATHS.geojson, '서울 행정동 경계 데이터')
+    fetchJsonCached(DATA_PATHS.geojson, '서울 행정동 경계 데이터')
       .then(setGeoData)
       .catch((error) => setGeoError(error.message))
   }, [])
@@ -137,7 +137,10 @@ export default function SeoulMap({
       }
       return `<strong>${name}</strong><span>${marketType.label}</span><span>개업률 ${marketType.openRate.toFixed(2)}% · 폐업률 ${marketType.closureRate.toFixed(2)}%</span>`
     }
-    if (!Number.isFinite(value)) return `<strong>${name}</strong><span>데이터 없음</span>`
+    if (!Number.isFinite(value)) {
+      const message = analysisMode === ANALYSIS_MODES.CLOSURE_CHANGE ? '비교 데이터 없음' : '데이터 없음'
+      return `<strong>${name}</strong><span>${message}</span>`
+    }
     if (analysisMode === ANALYSIS_MODES.CLOSURE_RATE) {
       return `<strong>${name}</strong><span>폐업률 ${formatAnalysisValue(value, analysisMode)}</span><span>폐업 점포 ${Number(stats['폐업_점포_수']).toLocaleString('ko-KR')}개</span>`
     }
@@ -218,7 +221,7 @@ export default function SeoulMap({
           >
             <Tooltip permanent direction="top" offset={[0, -7]} className="selected-dong-label">
               <strong>{selectedMapInfo.name}</strong>
-              {selectedMapInfo.stats && <span>폐업률 {selectedMapInfo.stats['폐업_률'].toFixed(2)}%</span>}
+              {Number.isFinite(selectedMapInfo.stats?.['폐업_률']) && <span>폐업률 {selectedMapInfo.stats['폐업_률'].toFixed(2)}%</span>}
               {selectedMapInfo.marketType && <span>시장 유형 · {selectedMapInfo.marketType.label}</span>}
             </Tooltip>
           </CircleMarker>

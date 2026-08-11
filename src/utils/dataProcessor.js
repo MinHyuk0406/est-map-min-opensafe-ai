@@ -1,5 +1,3 @@
-import Papa from 'papaparse'
-
 export const ALL_INDUSTRIES = '전체 업종'
 export const MIN_STORE_COUNT = 5
 export const MIN_DONG_STORE_COUNT = 5
@@ -19,7 +17,7 @@ export const ANALYSIS_MODE_OPTIONS = [
   { value: ANALYSIS_MODES.MARKET_TYPE, label: '시장 유형' },
 ]
 
-export const RISK_LEVELS = [
+export const CLOSURE_LEVELS = [
   { key: 'low', label: '낮음', color: '#86c995' },
   { key: 'normal', label: '보통', color: '#f2cf63' },
   { key: 'caution', label: '주의', color: '#ee944f' },
@@ -30,12 +28,12 @@ export const MODE_STYLES = {
   [ANALYSIS_MODES.CLOSURE_RATE]: {
     title: '상대적 폐업 수준',
     rankingTitle: '폐업률 높은 지역 TOP 10',
-    levels: RISK_LEVELS,
+    levels: CLOSURE_LEVELS,
     unit: '%',
   },
   [ANALYSIS_MODES.CLOSURE_CHANGE]: {
     title: '폐업률 변화',
-    rankingTitle: '폐업 증가 지역 TOP 10',
+    rankingTitle: '전분기 대비 폐업률 증가폭 TOP 10',
     levels: [
       { key: 'large-down', label: '크게 감소', color: '#5aa57b' },
       { key: 'down', label: '감소', color: '#b5d7a8' },
@@ -85,34 +83,10 @@ const SEOUL_DISTRICTS = {
   11740: '강동구',
 }
 
-function decodeCsv(buffer) {
-  try {
-    return new TextDecoder('utf-8', { fatal: true }).decode(buffer).replace(/^\uFEFF/, '')
-  } catch {
-    // Seoul open-data CSV files are commonly distributed as CP949/EUC-KR.
-    return new TextDecoder('euc-kr').decode(buffer)
-  }
-}
-
-export async function loadCsv(file) {
-  let response
-  try {
-    response = await fetch(file)
-    if (!response.ok) throw new Error(`Failed to load ${file}: ${response.status}`)
-  } catch (error) {
-    console.error('[dataProcessor] CSV loading failed', { url: file, error })
-    throw error
-  }
-  const text = decodeCsv(await response.arrayBuffer())
-
-  return new Promise((resolve, reject) => {
-    Papa.parse(text, {
-      header: true,
-      skipEmptyLines: true,
-      complete: ({ data, errors }) => errors.length ? reject(errors[0]) : resolve(data),
-      error: reject,
-    })
-  })
+function finiteNumber(value) {
+  if (value == null || value === '') return null
+  const number = Number(value)
+  return Number.isFinite(number) ? number : null
 }
 
 export function quarterLabelToCode(label) {
@@ -148,17 +122,9 @@ export function computeAnalysisThresholds(values, mode) {
   return [negativeMedian, 0, positiveMedian]
 }
 
-export function getRiskLevel(rate, thresholds) {
-  if (!Number.isFinite(rate)) return null
-  if (rate <= thresholds[0]) return RISK_LEVELS[0]
-  if (rate <= thresholds[1]) return RISK_LEVELS[1]
-  if (rate <= thresholds[2]) return RISK_LEVELS[2]
-  return RISK_LEVELS[3]
-}
-
 export function getAnalysisLevel(value, thresholds, mode) {
   if (!Number.isFinite(value)) return null
-  const levels = MODE_STYLES[mode]?.levels || RISK_LEVELS
+  const levels = MODE_STYLES[mode]?.levels || CLOSURE_LEVELS
   if (value <= thresholds[0]) return levels[0]
   if (value <= thresholds[1]) return levels[1]
   if (value <= thresholds[2]) return levels[2]
@@ -167,18 +133,19 @@ export function getAnalysisLevel(value, thresholds, mode) {
 
 export function getDongStats(item, quarterCode, industry = ALL_INDUSTRIES) {
   if (!item || !quarterCode) return null
-  if (!industry || industry === ALL_INDUSTRIES) return item.quarters?.[quarterCode] || null
-
-  const stats = item.industries?.[quarterCode]?.[industry]
+  const stats = !industry || industry === ALL_INDUSTRIES
+    ? item.quarters?.[quarterCode]
+    : item.industries?.[quarterCode]?.[industry]
   if (!stats) return null
-  const stores = Number(stats['점포_수']) || 0
-  const closed = Number(stats['폐업_점포_수']) || 0
+  const stores = finiteNumber(stats['점포_수'])
+  const closed = finiteNumber(stats['폐업_점포_수'])
+  const opened = finiteNumber(stats['개업_점포_수'])
   return {
     '점포_수': stores,
     '폐업_점포_수': closed,
-    '개업_점포_수': Number(stats['개업_점포_수']) || 0,
-    '폐업_률': stores ? (closed / stores) * 100 : 0,
-    '개업_률': stores ? ((Number(stats['개업_점포_수']) || 0) / stores) * 100 : 0,
+    '개업_점포_수': opened,
+    '폐업_률': stores > 0 && closed != null ? (closed / stores) * 100 : null,
+    '개업_률': stores > 0 && opened != null ? (opened / stores) * 100 : null,
   }
 }
 
@@ -188,10 +155,10 @@ export function getSeoulStoreAverages(processed, quarterCode, industry) {
   let closed = 0
   Object.values(processed || {}).forEach((item) => {
     const stats = getDongStats(item, quarterCode, industry)
-    if (!stats) return
-    stores += Number(stats['점포_수']) || 0
-    opened += Number(stats['개업_점포_수']) || 0
-    closed += Number(stats['폐업_점포_수']) || 0
+    if (!stats || !Number.isFinite(stats['점포_수']) || !Number.isFinite(stats['개업_점포_수']) || !Number.isFinite(stats['폐업_점포_수'])) return
+    stores += stats['점포_수']
+    opened += stats['개업_점포_수']
+    closed += stats['폐업_점포_수']
   })
   if (!stores) return null
   return {
@@ -201,7 +168,16 @@ export function getSeoulStoreAverages(processed, quarterCode, industry) {
 }
 
 export function classifyMarketType(stats, averages, minStores = MIN_STORE_COUNT) {
-  if (!stats || !averages || stats['점포_수'] < minStores) return null
+  if (
+    !stats
+    || !averages
+    || !Number.isFinite(stats['점포_수'])
+    || !Number.isFinite(stats['개업_률'])
+    || !Number.isFinite(stats['폐업_률'])
+    || !Number.isFinite(averages.openRate)
+    || !Number.isFinite(averages.closureRate)
+    || stats['점포_수'] < minStores
+  ) return null
   const openRate = stats['개업_률']
   const closureRate = stats['폐업_률']
   const highOpen = openRate >= averages.openRate
@@ -241,13 +217,13 @@ export function getMarketTypeData(processed, quarterCode, industry) {
 export function calculateClosureRateChange(item, quarterCode, industry = ALL_INDUSTRIES) {
   const current = getDongStats(item, quarterCode, industry)
   const previous = getDongStats(item, getPreviousQuarter(quarterCode), industry)
-  if (!current || !previous) return null
+  if (!Number.isFinite(current?.['폐업_률']) || !Number.isFinite(previous?.['폐업_률'])) return null
   return current['폐업_률'] - previous['폐업_률']
 }
 
 export function calculateNetOpenClose(item, quarterCode, industry = ALL_INDUSTRIES) {
   const stats = getDongStats(item, quarterCode, industry)
-  if (!stats || stats['개업_점포_수'] == null) return null
+  if (!Number.isFinite(stats?.['개업_점포_수']) || !Number.isFinite(stats?.['폐업_점포_수'])) return null
   return stats['개업_점포_수'] - stats['폐업_점포_수']
 }
 
@@ -266,7 +242,7 @@ export function getAnalysisDataset(processed, quarterCode, industry, mode) {
   return Object.entries(processed || {}).map(([code, item]) => ({
     code,
     name: item.name,
-    stores: getDongStats(item, quarterCode, industry)?.['점포_수'] || 0,
+    stores: getDongStats(item, quarterCode, industry)?.['점포_수'] ?? 0,
     value: getAnalysisValue(item, quarterCode, industry, mode),
   }))
 }
@@ -323,9 +299,13 @@ export function generateTrendSummary(trend, threshold = TREND_STABLE_THRESHOLD) 
   const available = trend.filter((point) => Number.isFinite(point.rate))
   if (available.length < 2) return null
   const lastThree = available.slice(-3)
-  if (lastThree.length === 3 && lastThree[1].rate > lastThree[0].rate && lastThree[2].rate > lastThree[1].rate) {
+  const consecutiveThree = lastThree.length === 3
+    && getPreviousQuarter(lastThree[1].quarterCode) === lastThree[0].quarterCode
+    && getPreviousQuarter(lastThree[2].quarterCode) === lastThree[1].quarterCode
+  if (consecutiveThree && lastThree[1].rate > lastThree[0].rate && lastThree[2].rate > lastThree[1].rate) {
     return { direction: 'up', text: '최근 3분기 연속 폐업률이 상승하고 있습니다.' }
   }
+  if (getPreviousQuarter(available.at(-1).quarterCode) !== available.at(-2).quarterCode) return null
   const change = available.at(-1).rate - available.at(-2).rate
   if (Math.abs(change) < threshold) {
     return { direction: 'steady', text: '최근 폐업률이 비슷한 수준을 유지하고 있습니다.' }
@@ -340,9 +320,9 @@ export function getSeoulAverage(processed, quarterCode, industry) {
   let closed = 0
   Object.values(processed || {}).forEach((item) => {
     const stats = getDongStats(item, quarterCode, industry)
-    if (!stats) return
-    stores += Number(stats['점포_수']) || 0
-    closed += Number(stats['폐업_점포_수']) || 0
+    if (!stats || !Number.isFinite(stats['점포_수']) || !Number.isFinite(stats['폐업_점포_수'])) return
+    stores += stats['점포_수']
+    closed += stats['폐업_점포_수']
   })
   return stores ? (closed / stores) * 100 : null
 }
@@ -362,11 +342,11 @@ export function topIndustries(industryStats, minStores = MIN_STORE_COUNT, topN =
   return Object.entries(industryStats)
     .filter(([, stats]) => stats)
     .map(([name, stats]) => {
-      const stores = Number(stats['점포_수']) || 0
-      const closed = Number(stats['폐업_점포_수']) || 0
-      return { name, stores, closed, rate: stores ? (closed / stores) * 100 : 0 }
+      const stores = finiteNumber(stats['점포_수'])
+      const closed = finiteNumber(stats['폐업_점포_수'])
+      return { name, stores, closed, rate: stores > 0 && closed != null ? (closed / stores) * 100 : null }
     })
-    .filter((item) => item.stores >= minStores && item.closed > 0)
+    .filter((item) => item.stores >= minStores && item.closed > 0 && Number.isFinite(item.rate))
     .sort((a, b) => b.rate - a.rate || b.closed - a.closed)
     .slice(0, topN)
 }

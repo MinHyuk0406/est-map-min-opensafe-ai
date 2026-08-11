@@ -20,7 +20,7 @@ import { buildFactSummary, getMarketContext } from '../services/dataService'
 import { formatCurrency, formatNumber, formatPercent, formatPopulation } from '../utils/formatters'
 
 function DataRow({ label, value, tone = '' }) {
-  return <div className="detail-data-row"><span>{label}</span><strong className={tone}>{value || '-'}</strong></div>
+  return <div className="detail-data-row"><span>{label}</span><strong className={tone}>{value ?? '-'}</strong></div>
 }
 
 function DetailSection({ title, description, children, className = '' }) {
@@ -80,13 +80,15 @@ export default function DongDetailPanel({
   const trendSummary = generateTrendSummary(trend)
   const facts = buildFactSummary(stats, marketData.averages, context.sales, context.floatingPopulation, trendSummary)
   const analysisValue = getAnalysisValue(info, quarterCode, industry, analysisMode)
-  const sampleInsufficient = stats && stats['점포_수'] < MIN_STORE_COUNT
+  const sampleInsufficient = Number.isFinite(stats?.['점포_수']) && stats['점포_수'] < MIN_STORE_COUNT
   const selectedIndustryStats = industry === ALL_INDUSTRIES
     ? info?.industries?.[quarterCode]
     : { [industry]: info?.industries?.[quarterCode]?.[industry] }
   const { items: top5, minStores: appliedMinStores } = topIndustriesWithFallback(selectedIndustryStats, MIN_STORE_COUNT, 5)
   const quarterLabel = `${quarterCode.slice(0, 4)}년 ${quarterCode.slice(4)}분기`
-  const netOpenClose = stats ? stats['개업_점포_수'] - stats['폐업_점포_수'] : null
+  const netOpenClose = Number.isFinite(stats?.['개업_점포_수']) && Number.isFinite(stats?.['폐업_점포_수'])
+    ? stats['개업_점포_수'] - stats['폐업_점포_수']
+    : null
   const displayIndex = getDongDisplayIndex(processed, dongCode)
   const marketDescription = marketType ? MARKET_TYPE_DESCRIPTIONS[marketType.key] : null
 
@@ -123,12 +125,12 @@ export default function DongDetailPanel({
           </div>
         )}
         {analysisMode === ANALYSIS_MODES.CLOSURE_CHANGE && !Number.isFinite(analysisValue) && (
-          <div className="active-analysis-value unavailable">이전 분기 데이터가 없어 변화량을 계산할 수 없습니다.</div>
+          <div className="active-analysis-value unavailable">전분기 비교 데이터 없음</div>
         )}
 
         <DetailSection title="핵심 개폐업 지표" description="선택 업종 기준">
           {stats ? (
-            <><div className="core-metrics"><div><span>폐업 점포</span><strong>{formatNumber(stats['폐업_점포_수'], '개')}</strong></div><div><span>개업 점포</span><strong>{formatNumber(stats['개업_점포_수'], '개')}</strong></div><div><span>개폐업 순증감</span><strong className={netOpenClose < 0 ? 'negative' : netOpenClose > 0 ? 'positive' : ''}>{netOpenClose > 0 ? '+' : ''}{formatNumber(netOpenClose, '개')}</strong></div></div><p className="total-store-note">전체 점포 {formatNumber(stats['점포_수'], '개')}</p></>
+            <><div className="core-metrics"><div><span>폐업 점포</span><strong>{formatNumber(stats['폐업_점포_수'], '개') || '데이터 없음'}</strong></div><div><span>개업 점포</span><strong>{formatNumber(stats['개업_점포_수'], '개') || '데이터 없음'}</strong></div><div><span>개폐업 순증감</span><strong className={netOpenClose < 0 ? 'negative' : netOpenClose > 0 ? 'positive' : ''}>{Number.isFinite(netOpenClose) ? `${netOpenClose > 0 ? '+' : ''}${formatNumber(netOpenClose, '개')}` : '데이터 없음'}</strong></div></div><p className="total-store-note">전체 점포 {formatNumber(stats['점포_수'], '개') || '데이터 없음'}</p></>
           ) : <p className="section-empty">선택한 조건의 점포 데이터가 없습니다.</p>}
           <p className="metric-note">개폐업 순증감은 개업 건수에서 폐업 건수를 뺀 값이며, 전체 점포 수의 실제 증감을 의미하지 않습니다.</p>
         </DetailSection>
@@ -159,7 +161,7 @@ export default function DongDetailPanel({
         </section>
 
         <DetailSection title="참고 데이터" description="판단을 위한 보조 지표" className="reference-section">
-          {contextError && <p className="context-warning">{contextError}</p>}
+          {contextError && <p className="context-warning">참고 데이터 없음 · {contextError}</p>}
           <div className="reference-group"><h4>추정매출</h4>{context.sales ? <div className="detail-data-grid single-column"><DataRow label="선택 분기 추정매출" value={formatCurrency(context.sales.amount)} /><DataRow label="매출 건수" value={formatNumber(context.sales.count, '건')} /><DataRow label="전분기 대비" value={formatPercent(context.sales.changeRate, 1, true) || '비교 데이터 없음'} tone={context.sales.changeRate < 0 ? 'negative' : context.sales.changeRate > 0 ? 'positive' : ''} /></div> : <p className="section-empty">해당 업종의 추정매출 데이터가 제공되지 않습니다.</p>}</div>
           <div className="reference-group"><h4>행정동 전체 인구</h4><div className="detail-data-grid single-column"><DataRow label="분기 총 유동인구" value={formatPopulation(context.floatingPopulation?.total) || '데이터 없음'} />{Number.isFinite(context.floatingPopulation?.changeRate) && <DataRow label="전분기 대비" value={formatPercent(context.floatingPopulation.changeRate, 1, true)} tone={context.floatingPopulation.changeRate < 0 ? 'negative' : 'positive'} />}<DataRow label="상주인구" value={formatPopulation(context.residentPopulation?.total) || '데이터 없음'} /></div></div>
           <p className="metric-note">유동인구와 상주인구는 업종별 수치가 아닌 해당 행정동 전체 값입니다.</p>

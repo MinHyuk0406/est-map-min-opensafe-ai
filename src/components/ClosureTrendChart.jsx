@@ -22,8 +22,14 @@ export default function ClosureTrendChart({ data, valueKey = 'rate', metricLabel
     }))
   }, [data, valueKey])
 
-  const available = points.filter((point) => point.y != null)
-  const polyline = available.map((point) => `${point.x},${point.y}`).join(' ')
+  const segments = points.reduce((result, point) => {
+    if (point.y == null) {
+      result.push([])
+    } else {
+      result[result.length - 1].push(point)
+    }
+    return result
+  }, [[]]).filter((segment) => segment.length > 1)
   const maxRate = points[0]?.maxRate || 1
 
   return (
@@ -51,7 +57,13 @@ export default function ClosureTrendChart({ data, valueKey = 'rate', metricLabel
             </g>
           )
         })}
-        {available.length > 1 && <polyline points={polyline} className={`chart-line ${valueKey === 'openRate' ? 'open-rate' : ''}`} />}
+        {segments.map((segment) => (
+          <polyline
+            key={`${segment[0].quarterCode}-${segment.at(-1).quarterCode}`}
+            points={segment.map((point) => `${point.x},${point.y}`).join(' ')}
+            className={`chart-line ${valueKey === 'openRate' ? 'open-rate' : ''}`}
+          />
+        ))}
         {points.map((point) => (
           <g key={point.quarterCode}>
             <text x={point.x} y={HEIGHT - 7} textAnchor="middle" className="chart-quarter-label">{point.shortLabel}</text>

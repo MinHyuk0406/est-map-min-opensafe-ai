@@ -6,7 +6,9 @@ const Papa = require('papaparse')
 const proj4 = require('proj4')
 
 const DATA_DIR = path.join(__dirname, '../src/data')
+const GENERATED_DATA_DIR = path.join(DATA_DIR, 'generated')
 const PUBLIC_DATA_DIR = path.join(__dirname, '../public/data')
+fs.mkdirSync(GENERATED_DATA_DIR, { recursive: true })
 fs.mkdirSync(PUBLIC_DATA_DIR, { recursive: true })
 
 function findDataFile(extension, marker = '') {
@@ -35,10 +37,18 @@ function nullableNumber(value) {
   return Number.isFinite(number) ? number : null
 }
 
+function clearProductionQuarterFiles() {
+  const productionPattern = /^(processed_by_dong|market_context)(?:\.\d{5})?\.min\.json$/
+  fs.readdirSync(PUBLIC_DATA_DIR)
+    .filter((name) => productionPattern.test(name))
+    .forEach((name) => fs.unlinkSync(path.join(PUBLIC_DATA_DIR, name)))
+}
+
 async function shpToGeojson(byDong) {
   const shpPath = findDataFile('.shp')
   const dbfPath = findDataFile('.dbf')
-  const outPath = path.join(PUBLIC_DATA_DIR, 'seoul_dong.geojson')
+  const outPath = path.join(GENERATED_DATA_DIR, 'seoul_dong.geojson')
+  const productionPath = path.join(PUBLIC_DATA_DIR, 'seoul_dong.min.geojson')
   const source = await shapefile.open(shpPath, dbfPath, { encoding: 'euc-kr' })
   const features = []
   const fromDef = '+proj=tmerc +lat_0=38 +lon_0=127 +k=1 +x_0=200000 +y_0=500000 +ellps=GRS80 +units=m +no_defs'
@@ -64,13 +74,71 @@ async function shpToGeojson(byDong) {
     result = await source.read()
   }
 
-  fs.writeFileSync(outPath, JSON.stringify({ type: 'FeatureCollection', features }, null, 2), 'utf8')
-  console.log('Wrote UTF-8 GeoJSON:', outPath)
+  const geojson = { type: 'FeatureCollection', features }
+  const roundCoordinates = (coordinates) => (
+    typeof coordinates[0] === 'number'
+      ? coordinates.map((coordinate) => Number(coordinate.toFixed(6)))
+      : coordinates.map(roundCoordinates)
+  )
+  const productionGeojson = {
+    type: 'FeatureCollection',
+    features: features.map((feature) => ({
+      type: 'Feature',
+      properties: {
+        ADSTRD_CD: feature.properties.ADSTRD_CD,
+        ADSTRD_NM: feature.properties.ADSTRD_NM,
+      },
+      geometry: {
+        type: feature.geometry.type,
+        coordinates: roundCoordinates(feature.geometry.coordinates),
+      },
+    })),
+  }
+
+  fs.writeFileSync(outPath, JSON.stringify(geojson), 'utf8')
+  fs.writeFileSync(productionPath, JSON.stringify(productionGeojson), 'utf8')
+  console.log('Wrote full and production GeoJSON:', outPath, productionPath)
+}
+
+function createCompactProcessedData(byDong, targetQuarter) {
+  const industryNames = Array.from(new Set(
+    Object.values(byDong).flatMap((dong) => (
+      Object.keys(dong.industries[targetQuarter] || {})
+    )),
+  )).sort((left, right) => left.localeCompare(right, 'ko'))
+  const industryIndexes = new Map(industryNames.map((name, index) => [name, index]))
+  const dongs = {}
+
+  Object.entries(byDong).forEach(([dongCode, dong]) => {
+    const quarterStats = dong.quarters[targetQuarter]
+    if (!quarterStats) return
+    dongs[dongCode] = {
+      n: dong.name,
+      q: {
+        [targetQuarter]: [
+          quarterStats['점포_수'],
+          quarterStats['폐업_점포_수'],
+          quarterStats['개업_점포_수'],
+        ],
+      },
+      i: {
+        [targetQuarter]: Object.entries(dong.industries[targetQuarter] || {}).map(([name, stats]) => [
+          industryIndexes.get(name),
+          stats.code,
+          stats['점포_수'],
+          stats['폐업_점포_수'],
+          stats['개업_점포_수'],
+        ]),
+      },
+    }
+  })
+
+  return { v: 1, q: targetQuarter, k: industryNames, d: dongs }
 }
 
 function parseCsvToJson() {
   const outRows = path.join(DATA_DIR, 'rows_parsed.json')
-  const outByDong = path.join(PUBLIC_DATA_DIR, 'processed_by_dong.json')
+  const outByDong = path.join(GENERATED_DATA_DIR, 'processed_by_dong.json')
   const parsed = readCsv('점포-행정동')
 
   const rows = parsed.data
@@ -121,11 +189,43 @@ function parseCsvToJson() {
   })
 
   fs.writeFileSync(outByDong, JSON.stringify(byDong), 'utf8')
-  console.log('Wrote UTF-8 JSON:', outRows, outByDong)
+  const quarters = Array.from(new Set(rows.map((row) => normalizeKey(row['기준_년분기_코드'])))).filter(Boolean).sort()
+  quarters.forEach((quarter) => {
+    const productionPath = path.join(PUBLIC_DATA_DIR, `processed_by_dong.${quarter}.min.json`)
+    fs.writeFileSync(productionPath, JSON.stringify(createCompactProcessedData(byDong, quarter)), 'utf8')
+    console.log('Wrote production store JSON:', productionPath)
+  })
+  console.log('Wrote full store JSON:', outByDong)
   return byDong
 }
 
-function parseMarketContext() {
+function createCompactMarketContext(context, quarter) {
+  return {
+    v: 1,
+    q: quarter,
+    s: {
+      [quarter]: Object.fromEntries(Object.entries(context.sales[quarter] || {}).map(([dongCode, industries]) => [
+        dongCode,
+        Object.fromEntries(Object.entries(industries).map(([industryCode, stats]) => [
+          industryCode,
+          [stats.amount, stats.count],
+        ])),
+      ])),
+    },
+    f: {
+      [quarter]: Object.fromEntries(Object.entries(context.floatingPopulation[quarter] || {}).map(
+        ([dongCode, stats]) => [dongCode, stats.total],
+      )),
+    },
+    r: {
+      [quarter]: Object.fromEntries(Object.entries(context.residentPopulation[quarter] || {}).map(
+        ([dongCode, stats]) => [dongCode, stats.total],
+      )),
+    },
+  }
+}
+
+function parseMarketContext(targetQuarters) {
   const salesParsed = readCsv('추정매출-행정동')
   const floatingParsed = readCsv('길단위인구-행정동')
   const residentParsed = readCsv('상주인구-행정동')
@@ -184,15 +284,24 @@ function parseMarketContext() {
     }
   })
 
-  const outPath = path.join(PUBLIC_DATA_DIR, 'market_context.json')
+  const outPath = path.join(GENERATED_DATA_DIR, 'market_context.json')
   fs.writeFileSync(outPath, JSON.stringify(context), 'utf8')
-  console.log('Wrote UTF-8 market context:', outPath)
+  targetQuarters.forEach((quarter) => {
+    const productionPath = path.join(PUBLIC_DATA_DIR, `market_context.${quarter}.min.json`)
+    fs.writeFileSync(productionPath, JSON.stringify(createCompactMarketContext(context, quarter)), 'utf8')
+    console.log('Wrote production market context:', productionPath)
+  })
+  console.log('Wrote full market context:', outPath)
   return context
 }
 
 async function main() {
+  clearProductionQuarterFiles()
   const byDong = parseCsvToJson()
-  parseMarketContext()
+  const quarters = Array.from(new Set(
+    Object.values(byDong).flatMap((dong) => Object.keys(dong.quarters)),
+  )).sort()
+  parseMarketContext(quarters)
   await shpToGeojson(byDong)
 }
 

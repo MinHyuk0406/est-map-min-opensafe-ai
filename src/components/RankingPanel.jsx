@@ -31,7 +31,7 @@ export default function RankingPanel({
           ))}
         </div>
       ) : unavailable ? (
-        <p className="ranking-empty">이전 분기 데이터가 없어 변화량을 계산할 수 없습니다.</p>
+        <p className="ranking-empty">비교 데이터 없음<br />이전 분기 데이터가 없어 변화량을 계산할 수 없습니다.</p>
       ) : ranking.length ? (
         <ol>
           {ranking.map((row, index) => (
@@ -49,7 +49,11 @@ export default function RankingPanel({
           ))}
         </ol>
       ) : (
-        <p className="ranking-empty">조건에 해당하는 지역이 없습니다.</p>
+        <p className="ranking-empty">
+          {mode === ANALYSIS_MODES.CLOSURE_CHANGE
+            ? '전분기 대비 폐업률이 증가한 지역이 없습니다.'
+            : '조건에 해당하는 지역이 없습니다.'}
+        </p>
       )}
     </section>
   )
