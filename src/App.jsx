@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import Header from './components/Header'
 import SeoulMap from './components/SeoulMap'
 import DongDetailPanel from './components/DongDetailPanel'
+import { DATA_PATHS } from './config/dataPaths'
+import { fetchJson } from './services/staticDataService'
 import {
   ALL_INDUSTRIES,
   ANALYSIS_MODES,
@@ -20,13 +22,9 @@ export default function App() {
   const [contextError, setContextError] = useState('')
 
   useEffect(() => {
-    const loadJson = (url) => fetch(url).then((response) => {
-      if (!response.ok) throw new Error(`${url} 데이터를 불러오지 못했습니다.`)
-      return response.json()
-    })
     Promise.allSettled([
-      loadJson('/src/data/processed_by_dong.json'),
-      loadJson('/src/data/market_context.json'),
+      fetchJson(DATA_PATHS.stores, '점포 분석 데이터'),
+      fetchJson(DATA_PATHS.marketContext, '매출·인구 데이터'),
     ]).then(([storeResult, contextResult]) => {
       if (storeResult.status === 'fulfilled') setProcessed(storeResult.value)
       else setDataError('점포 데이터를 불러오지 못했습니다.')

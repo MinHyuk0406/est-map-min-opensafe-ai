@@ -95,8 +95,14 @@ function decodeCsv(buffer) {
 }
 
 export async function loadCsv(file) {
-  const response = await fetch(file)
-  if (!response.ok) throw new Error(`CSV를 불러오지 못했습니다. (${response.status})`)
+  let response
+  try {
+    response = await fetch(file)
+    if (!response.ok) throw new Error(`Failed to load ${file}: ${response.status}`)
+  } catch (error) {
+    console.error('[dataProcessor] CSV loading failed', { url: file, error })
+    throw error
+  }
   const text = decodeCsv(await response.arrayBuffer())
 
   return new Promise((resolve, reject) => {

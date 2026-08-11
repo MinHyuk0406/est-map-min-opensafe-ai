@@ -19,6 +19,8 @@ import {
 } from '../utils/dataProcessor'
 import MapLegend from './MapLegend'
 import RankingPanel from './RankingPanel'
+import { DATA_PATHS } from '../config/dataPaths'
+import { fetchJson } from '../services/staticDataService'
 
 const EMPTY_STYLE = { color: '#9aa4a0', fillColor: '#e7ebe9', weight: 1, fillOpacity: 0.55 }
 
@@ -50,11 +52,7 @@ export default function SeoulMap({
   const quarterCode = quarterLabelToCode(quarter)
 
   useEffect(() => {
-    fetch('/src/data/seoul_dong.geojson')
-      .then((response) => {
-        if (!response.ok) throw new Error('지도 경계 데이터를 불러오지 못했습니다.')
-        return response.json()
-      })
+    fetchJson(DATA_PATHS.geojson, '서울 행정동 경계 데이터')
       .then(setGeoData)
       .catch((error) => setGeoError(error.message))
   }, [])

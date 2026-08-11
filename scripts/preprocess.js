@@ -6,6 +6,8 @@ const Papa = require('papaparse')
 const proj4 = require('proj4')
 
 const DATA_DIR = path.join(__dirname, '../src/data')
+const PUBLIC_DATA_DIR = path.join(__dirname, '../public/data')
+fs.mkdirSync(PUBLIC_DATA_DIR, { recursive: true })
 
 function findDataFile(extension, marker = '') {
   const file = fs.readdirSync(DATA_DIR).find((name) => (
@@ -36,7 +38,7 @@ function nullableNumber(value) {
 async function shpToGeojson(byDong) {
   const shpPath = findDataFile('.shp')
   const dbfPath = findDataFile('.dbf')
-  const outPath = path.join(DATA_DIR, 'seoul_dong.geojson')
+  const outPath = path.join(PUBLIC_DATA_DIR, 'seoul_dong.geojson')
   const source = await shapefile.open(shpPath, dbfPath, { encoding: 'euc-kr' })
   const features = []
   const fromDef = '+proj=tmerc +lat_0=38 +lon_0=127 +k=1 +x_0=200000 +y_0=500000 +ellps=GRS80 +units=m +no_defs'
@@ -68,7 +70,7 @@ async function shpToGeojson(byDong) {
 
 function parseCsvToJson() {
   const outRows = path.join(DATA_DIR, 'rows_parsed.json')
-  const outByDong = path.join(DATA_DIR, 'processed_by_dong.json')
+  const outByDong = path.join(PUBLIC_DATA_DIR, 'processed_stores.json')
   const parsed = readCsv('점포-행정동')
 
   const rows = parsed.data
@@ -182,7 +184,7 @@ function parseMarketContext() {
     }
   })
 
-  const outPath = path.join(DATA_DIR, 'market_context.json')
+  const outPath = path.join(PUBLIC_DATA_DIR, 'market_context.json')
   fs.writeFileSync(outPath, JSON.stringify(context), 'utf8')
   console.log('Wrote UTF-8 market context:', outPath)
   return context
