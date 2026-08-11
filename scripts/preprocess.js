@@ -70,7 +70,7 @@ async function shpToGeojson(byDong) {
 
 function parseCsvToJson() {
   const outRows = path.join(DATA_DIR, 'rows_parsed.json')
-  const outByDong = path.join(PUBLIC_DATA_DIR, 'processed_stores.json')
+  const outByDong = path.join(PUBLIC_DATA_DIR, 'processed_by_dong.json')
   const parsed = readCsv('점포-행정동')
 
   const rows = parsed.data
