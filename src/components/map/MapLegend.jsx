@@ -1,4 +1,4 @@
-import { ANALYSIS_MODES, MODE_STYLES, formatLegendBoundary } from '../utils/dataProcessor'
+import { ANALYSIS_MODES, MODE_STYLES, formatLegendBoundary } from '../../utils/dataProcessor'
 
 function getRangeLabel(index, thresholds, mode) {
   if (mode === ANALYSIS_MODES.MARKET_TYPE || thresholds.length < 3) return ''

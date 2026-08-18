@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import L from 'leaflet'
 import { GeoJSON, MapContainer, TileLayer, useMap } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
+import useSeoulMapData from '../hooks/useSeoulMapData'
 import {
   ANALYSIS_MODES,
   MIN_STORE_COUNT,
@@ -17,10 +18,11 @@ import {
   getPreviousQuarter,
   quarterLabelToCode,
 } from '../utils/dataProcessor'
-import MapLegend from './MapLegend'
 import RankingPanel from './RankingPanel'
-import { DATA_PATHS } from '../config/dataPaths'
-import { fetchJsonCached } from '../services/staticDataService'
+import ClosureLocationLayer from './map/ClosureLocationLayer'
+import DistrictBoundaryLayer from './map/DistrictBoundaryLayer'
+import MapLayerControls from './map/MapLayerControls'
+import MapLegend from './map/MapLegend'
 
 const DEFAULT_POLYGON_STYLE = Object.freeze({
   color: 'rgba(255, 255, 255, 0.9)',
@@ -46,14 +48,30 @@ const EMPTY_STYLE = {
   fillColor: '#e7ebe9',
   fillOpacity: 0.55,
 }
+const INITIAL_LAYERS = { analysis: true, closures: true }
 
 function FitSeoulBounds({ geoData }) {
   const map = useMap()
+
   useEffect(() => {
     if (!geoData) return
     const bounds = L.geoJSON(geoData).getBounds()
     if (bounds.isValid()) map.fitBounds(bounds, { padding: [22, 22] })
   }, [geoData, map])
+
+  return null
+}
+
+function MapZoomReporter({ onZoomChange }) {
+  const map = useMap()
+
+  useEffect(() => {
+    const reportZoom = () => onZoomChange(map.getZoom())
+    reportZoom()
+    map.on('zoomend', reportZoom)
+    return () => map.off('zoomend', reportZoom)
+  }, [map, onZoomChange])
+
   return null
 }
 
@@ -63,24 +81,32 @@ export default function SeoulMap({
   analysisMode,
   processed,
   selectedDongCode,
+  selectedDistrict,
   onSelectDong,
+  onSelectClosureDong,
+  onSelectDistrict,
 }) {
-  const [geoData, setGeoData] = useState(null)
-  const [geoError, setGeoError] = useState('')
   const [hoveredDongCode, setHoveredDongCode] = useState(null)
+  const [visibleLayers, setVisibleLayers] = useState(INITIAL_LAYERS)
+  const [hoveredDistrict, setHoveredDistrict] = useState(null)
+  const [zoom, setZoom] = useState(11)
   const geoJsonRef = useRef(null)
   const mapRef = useRef(null)
   const styleRef = useRef(() => EMPTY_STYLE)
   const tooltipRef = useRef(() => '')
   const hoveredLayerRef = useRef(null)
   const quarterCode = quarterLabelToCode(quarter)
+  const year = quarterCode?.slice(0, 4)
+  const { geoData, districtBoundaries, closureData, geoError, closureError } = useSeoulMapData(year)
 
-  useEffect(() => {
-    fetchJsonCached(DATA_PATHS.geojson, '서울 행정동 경계 데이터')
-      .then(setGeoData)
-      .catch((error) => setGeoError(error.message))
-  }, [])
-
+  const closurePoints = useMemo(
+    () => closureData?.quarters?.[quarterCode]?.points || [],
+    [closureData, quarterCode],
+  )
+  const visibleClosurePoints = useMemo(() => {
+    if (!selectedDistrict) return closurePoints
+    return closurePoints.filter((point) => point.district === selectedDistrict)
+  }, [closurePoints, selectedDistrict])
   const dataset = useMemo(
     () => getAnalysisDataset(processed, quarterCode, industry, analysisMode),
     [processed, quarterCode, industry, analysisMode],
@@ -147,7 +173,9 @@ export default function SeoulMap({
     const { name, stats, value, marketType } = getFeatureInfo(feature)
     if (analysisMode === ANALYSIS_MODES.MARKET_TYPE) {
       if (!marketType) {
-        const reason = stats && stats['점포_수'] < MIN_STORE_COUNT ? `표본 부족 · 점포 ${stats['점포_수']}개` : '데이터 없음'
+        const reason = stats && stats['점포_수'] < MIN_STORE_COUNT
+          ? `표본 부족 · 점포 ${stats['점포_수']}개`
+          : '데이터 없음'
         return `<strong>${name}</strong><span>${reason}</span>`
       }
       return `<strong>${name}</strong><span class="tooltip-value">${marketType.label}</span><span>개업률 ${marketType.openRate.toFixed(2)}% · 폐업률 ${marketType.closureRate.toFixed(2)}%</span>`
@@ -226,16 +254,29 @@ export default function SeoulMap({
     }
   }
 
+  const handleZoomChange = useCallback((nextZoom) => {
+    setZoom(nextZoom)
+    if (nextZoom < 13) onSelectDistrict(null)
+  }, [onSelectDistrict])
+
+  function toggleLayer(layerName) {
+    setVisibleLayers((current) => ({ ...current, [layerName]: !current[layerName] }))
+    if (layerName === 'closures') setHoveredDistrict(null)
+  }
+
   if (geoError) return <section className="map-wrap map-message">{geoError}</section>
 
+  const activeDistrict = hoveredDistrict || selectedDistrict
+  const showBoundaries = visibleLayers.analysis || visibleLayers.closures
+
   return (
-    <section className="map-wrap" aria-label="서울 행정동 폐업 변화 지도">
+    <section className="map-wrap" aria-label="서울 행정동 상권 분석 및 폐업 위치 지도">
       <MapContainer ref={mapRef} center={[37.5665, 126.978]} zoom={11} className="seoul-map">
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
-        {geoData && processed && (
+        {visibleLayers.analysis && geoData && processed && (
           <GeoJSON
             ref={geoJsonRef}
             data={geoData}
@@ -243,18 +284,58 @@ export default function SeoulMap({
             onEachFeature={onEachFeature}
           />
         )}
+        {showBoundaries && (
+          <DistrictBoundaryLayer
+            boundaries={districtBoundaries}
+            activeDistrict={activeDistrict}
+          />
+        )}
+        {visibleLayers.closures && visibleClosurePoints.length > 0 && (
+          <ClosureLocationLayer
+            points={visibleClosurePoints}
+            selectedDistrict={selectedDistrict}
+            onHoverDistrict={setHoveredDistrict}
+            onSelectDong={onSelectClosureDong}
+            onSelectDistrict={onSelectDistrict}
+          />
+        )}
         <FitSeoulBounds geoData={geoData} />
+        <MapZoomReporter onZoomChange={handleZoomChange} />
       </MapContainer>
+
       {!geoData && <div className="map-loading">지도를 불러오는 중입니다</div>}
-      <RankingPanel
-        mode={analysisMode}
-        ranking={ranking}
-        distribution={marketTypeData.distribution}
-        selectedDongCode={selectedDongCode}
-        onSelectDong={(code) => handleRegionSelect(code, true)}
-        unavailable={changeUnavailable}
-      />
-      <MapLegend mode={analysisMode} thresholds={thresholds} />
+      <MapLayerControls visibleLayers={visibleLayers} onToggle={toggleLayer} />
+
+      {visibleLayers.closures && (
+        <div className={`closure-status${closureError ? ' is-error' : ''}`} aria-live="polite">
+          <strong>{selectedDistrict ? `${selectedDistrict} 인허가 업소 폐업 위치` : '인허가 업소 폐업 위치'}</strong>
+          {closureError ? (
+            <span>{closureError}</span>
+          ) : !closureData ? (
+            <span>위치 데이터 준비 중</span>
+          ) : (
+            <span>
+              {visibleClosurePoints.length.toLocaleString('ko-KR')}곳 · {!selectedDistrict
+                ? '자치구별 묶음'
+                : zoom < 15 ? '행정동별 묶음' : zoom < 16 ? '행정동 내 클러스터' : '개별 위치'}
+            </span>
+          )}
+        </div>
+      )}
+
+      {visibleLayers.analysis && (
+        <>
+          <RankingPanel
+            mode={analysisMode}
+            ranking={ranking}
+            distribution={marketTypeData.distribution}
+            selectedDongCode={selectedDongCode}
+            onSelectDong={(code) => handleRegionSelect(code, true)}
+            unavailable={changeUnavailable}
+          />
+          <MapLegend mode={analysisMode} thresholds={thresholds} />
+        </>
+      )}
     </section>
   )
 }

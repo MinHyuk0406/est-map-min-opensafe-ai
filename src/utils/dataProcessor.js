@@ -327,6 +327,52 @@ export function getSeoulAverage(processed, quarterCode, industry) {
   return stores ? (closed / stores) * 100 : null
 }
 
+export function getDistrictNames(processed) {
+  return Array.from(new Set(
+    Object.keys(processed || {}).map((dongCode) => getDistrictName(dongCode)),
+  )).filter((name) => name !== '서울특별시')
+}
+
+export function getDistrictStats(processed, districtName, quarterCode, industry = ALL_INDUSTRIES) {
+  let stores = 0
+  let closed = 0
+  let opened = 0
+  let hasOpened = false
+
+  Object.entries(processed || {}).forEach(([dongCode, item]) => {
+    if (getDistrictName(dongCode) !== districtName) return
+    const stats = getDongStats(item, quarterCode, industry)
+    if (!stats) return
+    stores += Number(stats['점포_수']) || 0
+    closed += Number(stats['폐업_점포_수']) || 0
+    if (Number.isFinite(stats['개업_점포_수'])) {
+      opened += Number(stats['개업_점포_수'])
+      hasOpened = true
+    }
+  })
+
+  if (!stores && !closed) return null
+  return {
+    '점포_수': stores,
+    '폐업_점포_수': closed,
+    '개업_점포_수': hasOpened ? opened : null,
+    '폐업_률': stores ? (closed / stores) * 100 : 0,
+  }
+}
+
+export function getDistrictIndustryStats(processed, districtName, quarterCode) {
+  const result = {}
+  Object.entries(processed || {}).forEach(([dongCode, item]) => {
+    if (getDistrictName(dongCode) !== districtName) return
+    Object.entries(item.industries?.[quarterCode] || {}).forEach(([name, stats]) => {
+      if (!result[name]) result[name] = { '점포_수': 0, '폐업_점포_수': 0 }
+      result[name]['점포_수'] += Number(stats['점포_수']) || 0
+      result[name]['폐업_점포_수'] += Number(stats['폐업_점포_수']) || 0
+    })
+  })
+  return result
+}
+
 export function getIndustryNames(processed) {
   const names = new Set()
   Object.values(processed || {}).forEach((item) => {

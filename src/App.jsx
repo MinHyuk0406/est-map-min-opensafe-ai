@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Header from './components/Header'
 import SeoulMap from './components/SeoulMap'
 import DongDetailPanel from './components/DongDetailPanel'
@@ -21,6 +21,7 @@ export default function App() {
   const [selectedIndustry, setSelectedIndustry] = useState(ALL_INDUSTRIES)
   const [analysisMode, setAnalysisMode] = useState(ANALYSIS_MODES.CLOSURE_RATE)
   const [selectedDongCode, setSelectedDongCode] = useState(null)
+  const [selectedDistrict, setSelectedDistrict] = useState(null)
   const [processed, setProcessed] = useState({})
   const [marketContext, setMarketContext] = useState({})
   const [loadingQuarters, setLoadingQuarters] = useState(new Set())
@@ -31,10 +32,8 @@ export default function App() {
   const loadedContextQuartersRef = useRef(new Set())
   const inFlightQuartersRef = useRef(new Set())
 
-  const requiredQuarterCodes = AVAILABLE_QUARTERS
-
   useEffect(() => {
-    requiredQuarterCodes.forEach((quarterCode) => {
+    AVAILABLE_QUARTERS.forEach((quarterCode) => {
       const needsStores = !loadedStoreQuartersRef.current.has(quarterCode)
       const needsContext = !loadedContextQuartersRef.current.has(quarterCode)
       if ((!needsStores && !needsContext) || inFlightQuartersRef.current.has(quarterCode)) return
@@ -82,14 +81,28 @@ export default function App() {
         setAttemptedQuarters((current) => new Set([...current, quarterCode]))
       })
     })
-  }, [requiredQuarterCodes])
+  }, [])
 
   const industries = useMemo(() => getIndustryNames(processed), [processed])
   const initialLoadFinished = attemptedQuarters.has('20251')
-  const requiredDataLoading = requiredQuarterCodes.some((quarter) => loadingQuarters.has(quarter))
+  const requiredDataLoading = AVAILABLE_QUARTERS.some((quarter) => loadingQuarters.has(quarter))
   const selectedQuarterLabel = `${selectedQuarter.slice(0, 4)}년 ${selectedQuarter.slice(4)}분기`
   const selectedQuarterError = quarterErrors[selectedQuarter]
   const selectedContextError = contextErrors[selectedQuarter] || ''
+
+  const handleSelectDong = useCallback((dongCode) => {
+    setSelectedDistrict(null)
+    setSelectedDongCode(dongCode)
+  }, [])
+
+  const handleSelectClosureDong = useCallback((dongCode) => {
+    setSelectedDongCode(dongCode)
+  }, [])
+
+  const handleSelectDistrict = useCallback((districtName) => {
+    setSelectedDongCode(null)
+    setSelectedDistrict(districtName)
+  }, [])
 
   return (
     <div className="app-root">
@@ -105,33 +118,34 @@ export default function App() {
       {!initialLoadFinished ? (
         <div className="app-loading"><span className="loading-spinner" />상권 데이터를 불러오는 중입니다...</div>
       ) : (
-        <>
-          <main className="app-main">
-            <SeoulMap
-              quarter={selectedQuarter}
-              industry={selectedIndustry}
-              analysisMode={analysisMode}
-              processed={processed}
-              selectedDongCode={selectedDongCode}
-              onSelectDong={setSelectedDongCode}
-            />
-            <DongDetailPanel
-              dongCode={selectedDongCode}
-              quarter={selectedQuarter}
-              industry={selectedIndustry}
-              analysisMode={analysisMode}
-              processed={processed}
-              marketContext={marketContext}
-              contextError={selectedContextError}
-            />
-            {requiredDataLoading && (
-              <div className="quarter-data-status loading"><span className="loading-spinner" />데이터를 불러오는 중입니다</div>
-            )}
-            {!requiredDataLoading && selectedQuarterError && (
-              <div className="quarter-data-status error">{selectedQuarterLabel} · 데이터 없음</div>
-            )}
-          </main>
-        </>
+        <main className="app-main">
+          <SeoulMap
+            quarter={selectedQuarter}
+            industry={selectedIndustry}
+            analysisMode={analysisMode}
+            processed={processed}
+            selectedDongCode={selectedDongCode}
+            selectedDistrict={selectedDistrict}
+            onSelectDong={handleSelectDong}
+            onSelectClosureDong={handleSelectClosureDong}
+            onSelectDistrict={handleSelectDistrict}
+          />
+          <DongDetailPanel
+            dongCode={selectedDongCode}
+            quarter={selectedQuarter}
+            industry={selectedIndustry}
+            analysisMode={analysisMode}
+            processed={processed}
+            marketContext={marketContext}
+            contextError={selectedContextError}
+          />
+          {requiredDataLoading && (
+            <div className="quarter-data-status loading"><span className="loading-spinner" />데이터를 불러오는 중입니다</div>
+          )}
+          {!requiredDataLoading && selectedQuarterError && (
+            <div className="quarter-data-status error">{selectedQuarterLabel} · 데이터 없음</div>
+          )}
+        </main>
       )}
     </div>
   )
