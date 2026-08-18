@@ -1,5 +1,5 @@
 const LAYERS = [
-  { key: 'risk', label: '폐업 위험도' },
+  { key: 'analysis', label: '상권 분석' },
   { key: 'closures', label: '폐업 위치' },
 ]
 
@@ -21,4 +21,3 @@ export default function MapLayerControls({ visibleLayers, onToggle }) {
     </fieldset>
   )
 }
-

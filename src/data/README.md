@@ -1,6 +1,7 @@
-Place your data files here:
+Place the source CSV and Shapefile data in this directory.
 
-- 서울시 상권분석서비스(점포-행정동)_2025년.csv
-- Shapefile converted GeoJSON: seoul_dong.geojson
-
-Note: For performance, convert shapefile to GeoJSON during development and put it here.
+Run `npm run preprocess` after updating a source file. Full generated JSON is
+kept in `src/data/generated`, while compact browser-facing output is generated
+in `public/data` with quarter-specific `.min` filenames. Store and market
+context files are fetched lazily for the selected quarter; runtime code must
+not fetch files directly from `src/data`.

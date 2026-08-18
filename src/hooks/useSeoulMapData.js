@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 
-const SEOUL_DONG_URL = new URL('../data/seoul_dong.geojson', import.meta.url).href
 const PUBLIC_DATA_ROOT = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/data`
+const SEOUL_DONG_URL = `${PUBLIC_DATA_ROOT}/seoul_dong.min.geojson`
 
 async function readJson(response, errorMessage) {
   const contentType = response.headers.get('content-type') || ''
@@ -47,4 +47,3 @@ export default function useSeoulMapData(year) {
 
   return { geoData, districtBoundaries, closureData, geoError, closureError }
 }
-
