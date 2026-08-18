@@ -22,6 +22,7 @@ export default function DongDetailPanel({
   industry,
   processed,
   onOpenDetail,
+  canOpenDetail,
 }) {
   if (!dongCode) {
     return (
@@ -70,7 +71,8 @@ export default function DongDetailPanel({
         <section className="flow-summary"><h3>현재 흐름</h3><p>{flowSummary.map((line) => <span key={line}>{line}</span>)}</p></section>
         <section className="market-type-compact"><span>시장 유형</span><strong>{sampleInsufficient ? '표본 부족' : marketType?.label || '분류 데이터 없음'}</strong></section>
         {marketDescription && <p className="summary-market-description">{marketDescription}</p>}
-        <button type="button" className="detail-analysis-button" onClick={onOpenDetail}>상세 분석 보기 <span aria-hidden="true">→</span></button>
+        <button type="button" className="detail-analysis-button" onClick={onOpenDetail} disabled={!canOpenDetail} title={canOpenDetail ? undefined : '전체 업종이 아닌 업종을 선택해주세요.'}>상세 분석 보기 <span aria-hidden="true">→</span></button>
+        {!canOpenDetail && <p className="detail-analysis-help">AI 상세 분석은 상단에서 개별 업종을 선택한 뒤 이용할 수 있습니다.</p>}
       </div>
     </aside>
   )
