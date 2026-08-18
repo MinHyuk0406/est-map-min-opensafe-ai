@@ -4,6 +4,7 @@ export default function Header(props) {
   const { detailMode, onReturnToMap, ...filterProps } = props
   return (
     <header className={`app-header ${detailMode ? 'detail-header' : ''}`}>
+      {!detailMode && <a className="app-home-link" href="/" aria-label="처음 화면으로 돌아가기">← 처음 화면</a>}
       <div className="brand-block">
         <h1>서울 상권 변화 지도</h1>
         <p>개업과 폐업의 흐름으로 보는 서울 상권</p>
