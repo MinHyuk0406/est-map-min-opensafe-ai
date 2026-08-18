@@ -9,6 +9,7 @@ import {
   mergeMarketContext,
   mergeProcessedData,
 } from './services/staticDataService'
+import { getIndustryCode } from './services/dataService'
 import {
   ALL_INDUSTRIES,
   ANALYSIS_MODES,
@@ -90,6 +91,20 @@ export default function App() {
   const requiredDataLoading = AVAILABLE_QUARTERS.some((quarter) => loadingQuarters.has(quarter))
   const selectedQuarterLabel = `${selectedQuarter.slice(0, 4)}년 ${selectedQuarter.slice(4)}분기`
   const selectedQuarterError = quarterErrors[selectedQuarter]
+  const openSafeSelection = useMemo(() => {
+    if (!selectedDongCode || selectedIndustry === ALL_INDUSTRIES) return null
+    const dong = processed[selectedDongCode]
+    const industryCode = getIndustryCode(processed, selectedQuarter, selectedDongCode, selectedIndustry)
+    if (!dong?.name || !industryCode) return null
+    return {
+      dongCode: String(selectedDongCode),
+      dongName: dong.name,
+      industryCode,
+      industryName: selectedIndustry,
+      quarter: selectedQuarter,
+      quarterLabel: selectedQuarterLabel,
+    }
+  }, [processed, selectedDongCode, selectedIndustry, selectedQuarter, selectedQuarterLabel])
 
   const handleSelectDong = useCallback((dongCode) => {
     setSelectedDistrict(null)
@@ -112,8 +127,8 @@ export default function App() {
   }, [])
 
   const handleOpenDetail = useCallback(() => {
-    if (selectedDongCode) setViewMode('detail')
-  }, [selectedDongCode])
+    if (openSafeSelection) setViewMode('detail')
+  }, [openSafeSelection])
   const handleReturnToMap = useCallback(() => setViewMode('map'), [])
 
   const detailViewActive = viewMode === 'detail' && Boolean(selectedDongCode)
@@ -139,6 +154,7 @@ export default function App() {
           quarter={selectedQuarter}
           industry={selectedIndustry}
           processed={processed}
+          openSafeSelection={openSafeSelection}
           onReturnToMap={handleReturnToMap}
         />
       ) : (
@@ -162,6 +178,7 @@ export default function App() {
             analysisMode={analysisMode}
             processed={processed}
             onOpenDetail={handleOpenDetail}
+            canOpenDetail={Boolean(openSafeSelection)}
           />
           {requiredDataLoading && (
             <div className="quarter-data-status loading"><span className="loading-spinner" />데이터를 불러오는 중입니다</div>
