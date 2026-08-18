@@ -19,7 +19,7 @@ export default function FilterBar({
   return (
     <div className="filter-bar" aria-label="데이터 필터">
       <label className="filter-field">
-        <span>기준 분기</span>
+        <span className="sr-only">기준 분기</span>
         <select value={selectedQuarter} onChange={(event) => onQuarterChange(event.target.value)}>
           {QUARTERS.map((quarter) => (
             <option key={quarter.value} value={quarter.value}>{quarter.label}</option>
@@ -27,13 +27,13 @@ export default function FilterBar({
         </select>
       </label>
       <label className="filter-field industry-filter">
-        <span>업종</span>
+        <span className="sr-only">업종</span>
         <select value={selectedIndustry} onChange={(event) => onIndustryChange(event.target.value)}>
           {industries.map((industry) => <option key={industry}>{industry}</option>)}
         </select>
       </label>
       <div className="analysis-mode-field">
-        <span>분석 기준</span>
+        <span className="sr-only">분석 기준</span>
         <div className="segmented-control" role="tablist" aria-label="지도 분석 기준">
           {ANALYSIS_MODE_OPTIONS.map((mode) => (
             <button

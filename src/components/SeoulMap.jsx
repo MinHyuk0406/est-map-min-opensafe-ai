@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import L from 'leaflet'
-import { CircleMarker, GeoJSON, MapContainer, TileLayer, Tooltip, useMap } from 'react-leaflet'
+import { GeoJSON, MapContainer, TileLayer, useMap } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import {
   ANALYSIS_MODES,
@@ -22,7 +22,30 @@ import RankingPanel from './RankingPanel'
 import { DATA_PATHS } from '../config/dataPaths'
 import { fetchJsonCached } from '../services/staticDataService'
 
-const EMPTY_STYLE = { color: '#9aa4a0', fillColor: '#e7ebe9', weight: 1, fillOpacity: 0.55 }
+const DEFAULT_POLYGON_STYLE = Object.freeze({
+  color: 'rgba(255, 255, 255, 0.9)',
+  weight: 1.2,
+  opacity: 1,
+  fillOpacity: 0.69,
+})
+const HOVER_POLYGON_STYLE = Object.freeze({
+  color: '#3f6258',
+  weight: 2,
+  opacity: 1,
+  fillOpacity: 0.75,
+})
+const SELECTED_POLYGON_STYLE = Object.freeze({
+  color: '#244c40',
+  weight: 3,
+  opacity: 1,
+  fillOpacity: 0.82,
+})
+const EMPTY_STYLE = {
+  ...DEFAULT_POLYGON_STYLE,
+  color: 'rgba(255, 255, 255, 0.84)',
+  fillColor: '#e7ebe9',
+  fillOpacity: 0.55,
+}
 
 function FitSeoulBounds({ geoData }) {
   const map = useMap()
@@ -44,11 +67,12 @@ export default function SeoulMap({
 }) {
   const [geoData, setGeoData] = useState(null)
   const [geoError, setGeoError] = useState('')
+  const [hoveredDongCode, setHoveredDongCode] = useState(null)
   const geoJsonRef = useRef(null)
   const mapRef = useRef(null)
   const styleRef = useRef(() => EMPTY_STYLE)
   const tooltipRef = useRef(() => '')
-  const selectedCodeRef = useRef(selectedDongCode)
+  const hoveredLayerRef = useRef(null)
   const quarterCode = quarterLabelToCode(quarter)
 
   useEffect(() => {
@@ -81,18 +105,6 @@ export default function SeoulMap({
     () => new Map(marketTypeData.points.map((point) => [point.code, point])),
     [marketTypeData],
   )
-  const selectedMapInfo = useMemo(() => {
-    if (!geoData || !selectedDongCode) return null
-    const feature = geoData.features.find((item) => String(item.properties?.ADSTRD_CD) === String(selectedDongCode))
-    if (!feature) return null
-    const item = processed?.[selectedDongCode]
-    return {
-      center: L.geoJSON(feature).getBounds().getCenter(),
-      name: item?.name || '행정동 정보 없음',
-      stats: getDongStats(item, quarterCode, industry),
-      marketType: marketTypeByCode.get(selectedDongCode) || null,
-    }
-  }, [geoData, selectedDongCode, processed, quarterCode, industry, marketTypeByCode])
   const previousQuarter = getPreviousQuarter(quarterCode)
   const previousDataAvailable = useMemo(
     () => Object.values(processed || {}).some((item) => getDongStats(item, previousQuarter, industry)),
@@ -113,18 +125,21 @@ export default function SeoulMap({
     }
   }
 
-  function styleFeature(feature) {
+  function styleFeature(feature, hoveredCode = hoveredDongCode) {
     const { code, value, marketType } = getFeatureInfo(feature)
     const level = analysisMode === ANALYSIS_MODES.MARKET_TYPE
       ? MODE_STYLES[ANALYSIS_MODES.MARKET_TYPE].levels.find((item) => item.key === marketType?.key)
       : getAnalysisLevel(value, thresholds, analysisMode)
     if (!level) return EMPTY_STYLE
-    const selected = code === selectedDongCode
+    const selected = String(code) === String(selectedDongCode)
+    const hovered = String(code) === String(hoveredCode)
     return {
-      color: selected ? '#202a26' : '#ffffff',
+      ...(selected
+        ? SELECTED_POLYGON_STYLE
+        : hovered
+          ? HOVER_POLYGON_STYLE
+          : DEFAULT_POLYGON_STYLE),
       fillColor: level.color,
-      weight: selected ? 3 : 1,
-      fillOpacity: selected ? 0.9 : 0.72,
     }
   }
 
@@ -135,33 +150,34 @@ export default function SeoulMap({
         const reason = stats && stats['점포_수'] < MIN_STORE_COUNT ? `표본 부족 · 점포 ${stats['점포_수']}개` : '데이터 없음'
         return `<strong>${name}</strong><span>${reason}</span>`
       }
-      return `<strong>${name}</strong><span>${marketType.label}</span><span>개업률 ${marketType.openRate.toFixed(2)}% · 폐업률 ${marketType.closureRate.toFixed(2)}%</span>`
+      return `<strong>${name}</strong><span class="tooltip-value">${marketType.label}</span><span>개업률 ${marketType.openRate.toFixed(2)}% · 폐업률 ${marketType.closureRate.toFixed(2)}%</span>`
     }
     if (!Number.isFinite(value)) {
       const message = analysisMode === ANALYSIS_MODES.CLOSURE_CHANGE ? '비교 데이터 없음' : '데이터 없음'
       return `<strong>${name}</strong><span>${message}</span>`
     }
     if (analysisMode === ANALYSIS_MODES.CLOSURE_RATE) {
-      return `<strong>${name}</strong><span>폐업률 ${formatAnalysisValue(value, analysisMode)}</span><span>폐업 점포 ${Number(stats['폐업_점포_수']).toLocaleString('ko-KR')}개</span>`
+      return `<strong>${name}</strong><span><b class="tooltip-value">${formatAnalysisValue(value, analysisMode)}</b> 폐업률</span><span>폐업 점포 ${Number(stats['폐업_점포_수']).toLocaleString('ko-KR')}개</span>`
     }
     if (analysisMode === ANALYSIS_MODES.CLOSURE_CHANGE) {
-      return `<strong>${name}</strong><span>폐업률 변화 ${formatAnalysisValue(value, analysisMode)}</span><span>전분기 폐업률과의 차이</span>`
+      return `<strong>${name}</strong><span><b class="tooltip-value">${formatAnalysisValue(value, analysisMode)}</b> 폐업률 변화</span><span>전분기 폐업률과의 차이</span>`
     }
-    return `<strong>${name}</strong><span>개폐업 순증감 ${formatAnalysisValue(value, analysisMode)}</span><span>개업 ${stats['개업_점포_수'].toLocaleString('ko-KR')}개 · 폐업 ${stats['폐업_점포_수'].toLocaleString('ko-KR')}개</span>`
+    return `<strong>${name}</strong><span><b class="tooltip-value">${formatAnalysisValue(value, analysisMode)}</b> 개폐업 순증감</span><span>개업 ${stats['개업_점포_수'].toLocaleString('ko-KR')}개 · 폐업 ${stats['폐업_점포_수'].toLocaleString('ko-KR')}개</span>`
   }
 
   styleRef.current = styleFeature
   tooltipRef.current = buildTooltip
-  selectedCodeRef.current = selectedDongCode
 
   useEffect(() => {
     const layerGroup = geoJsonRef.current
     if (!layerGroup) return
+    let selectedLayer = null
     layerGroup.eachLayer((layer) => {
       layer.setStyle(styleRef.current(layer.feature))
       layer.setTooltipContent(tooltipRef.current(layer.feature))
-      if (String(layer.feature?.properties?.ADSTRD_CD) === String(selectedDongCode)) layer.closeTooltip()
+      if (String(layer.feature?.properties?.ADSTRD_CD) === String(selectedDongCode)) selectedLayer = layer
     })
+    selectedLayer?.bringToFront()
   }, [analysisMode, industry, quarterCode, selectedDongCode, thresholds])
 
   function onEachFeature(feature, layer) {
@@ -173,19 +189,33 @@ export default function SeoulMap({
     })
     layer.on({
       mouseover: () => {
-        if (selectedCodeRef.current === code) layer.closeTooltip()
-        layer.setStyle({ color: '#26322d', weight: 3, fillOpacity: 0.86 })
+        const previousHoveredLayer = hoveredLayerRef.current
+        if (previousHoveredLayer && previousHoveredLayer !== layer) {
+          previousHoveredLayer.closeTooltip()
+          previousHoveredLayer.setStyle(styleRef.current(previousHoveredLayer.feature, null))
+        }
+        hoveredLayerRef.current = layer
+        setHoveredDongCode(code)
+        layer.setStyle(styleRef.current(feature, code))
       },
-      mouseout: () => layer.setStyle(styleRef.current(feature)),
+      mouseout: () => {
+        layer.closeTooltip()
+        if (hoveredLayerRef.current === layer) {
+          hoveredLayerRef.current = null
+          setHoveredDongCode(null)
+        }
+        layer.setStyle(styleRef.current(feature, null))
+      },
       click: () => {
         layer.closeTooltip()
-        onSelectDong(code)
+        handleRegionSelect(code)
       },
     })
   }
 
-  function handleRankingSelect(code) {
+  function handleRegionSelect(code, focusOnRegion = false) {
     onSelectDong(code)
+    if (!focusOnRegion) return
     const feature = geoData?.features.find(
       (item) => String(item.properties?.ADSTRD_CD) === String(code),
     )
@@ -213,19 +243,6 @@ export default function SeoulMap({
             onEachFeature={onEachFeature}
           />
         )}
-        {selectedMapInfo && (
-          <CircleMarker
-            center={selectedMapInfo.center}
-            radius={5}
-            pathOptions={{ color: '#ffffff', fillColor: '#172d24', fillOpacity: 1, weight: 2 }}
-          >
-            <Tooltip permanent direction="top" offset={[0, -7]} className="selected-dong-label">
-              <strong>{selectedMapInfo.name}</strong>
-              {Number.isFinite(selectedMapInfo.stats?.['폐업_률']) && <span>폐업률 {selectedMapInfo.stats['폐업_률'].toFixed(2)}%</span>}
-              {selectedMapInfo.marketType && <span>시장 유형 · {selectedMapInfo.marketType.label}</span>}
-            </Tooltip>
-          </CircleMarker>
-        )}
         <FitSeoulBounds geoData={geoData} />
       </MapContainer>
       {!geoData && <div className="map-loading">지도를 불러오는 중입니다</div>}
@@ -234,7 +251,7 @@ export default function SeoulMap({
         ranking={ranking}
         distribution={marketTypeData.distribution}
         selectedDongCode={selectedDongCode}
-        onSelectDong={handleRankingSelect}
+        onSelectDong={(code) => handleRegionSelect(code, true)}
         unavailable={changeUnavailable}
       />
       <MapLegend mode={analysisMode} thresholds={thresholds} />

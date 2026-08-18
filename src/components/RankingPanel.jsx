@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import {
   ANALYSIS_MODES,
   MODE_STYLES,
@@ -12,13 +13,16 @@ export default function RankingPanel({
   onSelectDong,
   unavailable,
 }) {
+  const [expanded, setExpanded] = useState(false)
   const modeStyle = MODE_STYLES[mode]
+  const visibleRanking = expanded ? ranking.slice(0, 10) : ranking.slice(0, 5)
+
+  useEffect(() => setExpanded(false), [mode, ranking])
 
   return (
     <section className="ranking-panel" aria-label={modeStyle.rankingTitle}>
       <div className="ranking-heading">
-        <span>서울 행정동 분석</span>
-        <h2>{modeStyle.rankingTitle}</h2>
+        <h2>{modeStyle.rankingTitle.replace(' TOP 10', '')}</h2>
       </div>
       {mode === ANALYSIS_MODES.MARKET_TYPE ? (
         <div className="type-distribution">
@@ -34,7 +38,7 @@ export default function RankingPanel({
         <p className="ranking-empty">비교 데이터 없음<br />이전 분기 데이터가 없어 변화량을 계산할 수 없습니다.</p>
       ) : ranking.length ? (
         <ol>
-          {ranking.map((row, index) => (
+          {visibleRanking.map((row, index) => (
             <li key={row.code}>
               <button
                 type="button"
@@ -54,6 +58,16 @@ export default function RankingPanel({
             ? '전분기 대비 폐업률이 증가한 지역이 없습니다.'
             : '조건에 해당하는 지역이 없습니다.'}
         </p>
+      )}
+      {mode !== ANALYSIS_MODES.MARKET_TYPE && !unavailable && ranking.length > 5 && (
+        <button
+          type="button"
+          className="ranking-toggle"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((current) => !current)}
+        >
+          {expanded ? 'TOP 5만 보기 ↑' : '전체 TOP 10 보기 →'}
+        </button>
       )}
     </section>
   )
